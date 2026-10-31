@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JoyChord</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f4f1ea;--fg:#1d1b26;--card:#fff;--mut:#6b6880;--line:#d9d4e6;--btn:#ece8f7}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#14121c;--fg:#f1eefb;--card:#1e1b2b;--mut:#9d98b5;--line:#322e45;--btn:#2a2640}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#14121c;--fg:#f1eefb;--card:#1e1b2b;--mut:#9d98b5;--line:#322e45;--btn:#2a2640}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-user-select:none;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+header,.wrap,footer{position:relative;z-index:1;max-width:980px;margin:0 auto;padding:10px 14px}
+h1{margin:0;font-size:clamp(26px,6vw,40px);letter-spacing:-.5px}
+h1 span{background:linear-gradient(90deg,#4aa8ff,#ff5fa2,#ffb13d);-webkit-background-clip:text;background-clip:text;color:transparent}
+#stat{color:var(--mut);font-size:14px;margin-top:4px}
+.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:14px}
+.panel h2{margin:0 0 2px;font-size:18px}.panel p{margin:0 0 10px;color:var(--mut);font-size:13px}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:8px;max-width:340px;margin:0 auto}
+.b{aspect-ratio:1;border-radius:18px;border:2px solid var(--line);background:var(--btn);color:var(--fg);font:700 clamp(20px,6vw,30px) system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;touch-action:none;cursor:pointer;transition:transform .06s}
+.b small{font:500 11px system-ui;color:var(--mut)}
+.b.on{background:var(--c);border-color:var(--c);color:#111;box-shadow:0 0 26px var(--c);transform:scale(.94)}
+.b.on small{color:#111}
+.ctr{grid-area:2/2;display:flex;align-items:center;justify-content:center;font:800 clamp(28px,9vw,44px) system-ui;color:var(--mut)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px}
+.chip{border:1px solid var(--line);background:var(--btn);color:var(--fg);border-radius:99px;padding:8px 14px;font:600 14px system-ui;cursor:pointer}
+.chip.on{background:var(--fg);color:var(--bg)}
+footer{color:var(--mut);font-size:13px;line-height:1.5;padding-bottom:30px}
+#start{position:fixed;inset:0;z-index:5;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:20px}
+#start button{font:700 20px system-ui;padding:16px 34px;border-radius:99px;border:0;background:linear-gradient(90deg,#4aa8ff,#ff5fa2);color:#fff;cursor:pointer}
+#start p{max-width:420px;color:var(--mut);font-size:14px;margin:0}
+</style></head><body>
+<canvas id="cv"></canvas>
+<div id="start"><h1><span>JoyChord</span></h1><button>Start playing</button><p>Player 1 plays chords, Player 2 plays melody. Use controllers, touch, mouse or keyboard.</p></div>
+<header><h1><span>JoyChord</span></h1><div id="stat"></div></header>
+<div class="wrap" id="wrap"></div>
+<footer>
+<b>Controller:</b> D-pad or left stick = chords. With one controller the right stick = melody; with two, the second controller plays melody. LB/RB or stick clicks change instrument (single controller: LT/RT for melody).<br>
+<b>Keyboard:</b> W A S D or arrows = chords (Q/E instrument). I O L . , M J U = melody around K (Y/P instrument).
+</footer>
+<script>
+const $=s=>document.querySelector(s);
+let ctx,master;
+function initAudio(){
+  if(ctx){ctx.resume();return}
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  const c=ctx.createDynamicsCompressor();master=ctx.createGain();master.gain.value=.8;
+  master.connect(c);c.connect(ctx.destination);
+}
+const mtof=m=>440*Math.pow(2,(m-69)/12);
+const INST=['Harp','Piano','Organ','Synth','Bell'];
+function voice(inst,midi,vel,t){
+  const f=mtof(midi),g=ctx.createGain(),os=[];g.connect(master);
+  const mk=(type,fr,amp,dest)=>{const o=ctx.createOscillator(),a=ctx.createGain();o.type=type;o.frequency.value=fr;a.gain.value=amp;o.connect(a);a.connect(dest||g);o.start(t);os.push(o);return o};
+  let rel=.25,dec=0;
+  if(inst==0){mk('triangle',f,1);mk('sine',f*2,.3);dec=1.6;rel=.2}
+  else if(inst==1){mk('triangle',f,.8);mk('sine',f*2,.25);mk('sine',f*3,.1);dec=2.4;rel=.3}
+  else if(inst==2){mk('sine',f,.6);mk('sine',f*2,.35);mk('sine',f*3,.2);mk('sine',f*4,.1);rel=.15}
+  else if(inst==3){const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=1500;lp.connect(g);mk('sawtooth',f,.4,lp);mk('sawtooth',f*1.006,.4,lp);rel=.3}
+  else{const c=mk('sine',f,1),m=ctx.createOscillator(),mg=ctx.createGain();m.frequency.value=f*3.5;mg.gain.value=f*1.2;m.connect(mg);mg.connect(c.frequency);m.start(t);os.push(m);dec=3;rel=.4}
+  g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(vel,t+.012);
+  if(dec){g.gain.exponentialRampToValueAtTime(.0001,t+dec);os.forEach(o=>o.stop(t+dec+.1))}
+  return{release(){const n=ctx.currentTime;g.gain.cancelScheduledValues(n);g.gain.setValueAtTime(Math.max(g.gain.value,.0001),n);g.gain.setTargetAtTime(0,n,rel/3);os.forEach(o=>{try{o.stop(n+rel*2+.1)}catch(e){}})}};
+}
+// Chords by direction: up C, right G, down Am, left F
+const NC=['C','G','Am','F'],KC=['W','D','S','A'];
+const CH=[[48,52,55,60],[43,55,59,62],[45,52,57,60],[41,53,57,60]];
+const PC=['1/2','2/3','3/2','2/1'],HC=[205,140,330,30];
+// Melody clockwise from up: C D E F G A B C
+const NM=['C','D','E','F','G','A','B','C↑'],KM=['I','O','L','.',',','M','J','U'];
+const MEL=[72,74,76,77,79,81,83,84];
+const PM=['1/2','1/3','2/3','3/3','3/2','3/1','2/1','1/1'];
+const btns={c:[],m:[]},chips={c:[],m:[]},ctr={};
+class Part{
+  constructor(id,inst,play){this.id=id;this.inst=inst;this.play=play;this.src=new Map();this.cur=null;this.v=[]}
+  set(s,i){
+    if(i==null)this.src.delete(s);
+    else if(this.src.get(s)!==i){this.src.delete(s);this.src.set(s,i)}
+    const k=[...this.src.values()],nx=k.length?k[k.length-1]:null;
+    if(nx!==this.cur){this.rel();this.cur=nx;if(nx!=null)this.trig(nx);show(this.id,nx)}
+  }
+  rel(){this.v.forEach(x=>x.release());this.v=[]}
+  trig(i){if(!ctx)return;this.v=this.play(i,this.inst,ctx.currentTime);burst(this.id,i)}
+  cycle(d){this.setInst((this.inst+d+5)%5)}
+  setInst(n){this.inst=n;chips[this.id].forEach((c,j)=>c.classList.toggle('on',j==n));if(this.cur!=null){this.rel();this.trig(this.cur)}}
+}
+const chords=new Part('c',1,(i,ins,t)=>CH[i].map((m,j)=>voice(ins,m,.15,t+j*.03)));
+const melody=new Part('m',3,(i,ins,t)=>[voice(ins,MEL[i],.3,t)]);
+const parts={c:chords,m:melody};
+function show(id,i){
+  btns[id].forEach((b,j)=>b.classList.toggle('on',j===i));
+  ctr[id].textContent=i==null?'':(id=='c'?NC[i]:NM[i]);
+}
+function build(id,title,sub,names,keys,pos){
+  const p=document.createElement('div');p.className='panel';
+  p.innerHTML='<h2>'+title+'</h2><p>'+sub+'</p>';
+  const pad=document.createElement('div');pad.className='pad';
+  names.forEach((n,i)=>{
+    const b=document.createElement('button');b.className='b';b.style.gridArea=pos[i];
+    b.style.setProperty('--c',id=='c'?'hsl('+HC[i]+',85%,62%)':'hsl('+i*45+',85%,62%)');
+    b.innerHTML=n+'<small>'+keys[i]+'</small>';
+    const part=parts[id],src=e=>'p'+e.pointerId;
+    b.addEventListener('pointerdown',e=>{e.preventDefault();initAudio();try{b.releasePointerCapture(e.pointerId)}catch(x){}part.set(src(e),i)});
+    b.addEventListener('pointerenter',e=>{if(e.buttons&1)part.set(src(e),i)});
+    b.addEventListener('pointerleave',e=>{if(part.src.get(src(e))===i)part.set(src(e),null)});
+    b.addEventListener('contextmenu',e=>e.preventDefault());
+    pad.appendChild(b);btns[id].push(b);
+  });
+  const c=document.createElement('div');c.className='ctr';pad.appendChild(c);ctr[id]=c;
+  p.appendChild(pad);
+  const row=document.createElement('div');row.className='chips';
+  INST.forEach((n,j)=>{const ch=document.createElement('button');ch.className='chip';ch.textContent=n;ch.onclick=()=>{initAudio();parts[id].setInst(j)};row.appendChild(ch);chips[id].push(ch)});
+  p.appendChild(row);$('#wrap').appendChild(p);
+}
+build('c','Player 1 · Chords','D-pad / left stick: up C, right G, down Am, left F',NC,KC,PC);
+build('m','Player 2 · Melody','Stick or pad: up C, up-right D, right E … clockwise',NM,KM,PM);
+chords.setInst(1);melody.setInst(3);
+window.addEventListener('pointerup',e=>{chords.set('p'+e.pointerId,null);melody.set('p'+e.pointerId,null)});
+window.addEventListener('pointercancel',e=>{chords.set('p'+e.pointerId,null);melody.set('p'+e.pointerId,null)});
+// Keyboard
+const KEYC={w:0,arrowup:0,d:1,arrowright:1,s:2,arrowdown:2,a:3,arrowleft:3};
+const KEYM={i:0,o:1,l:2,'.':3,',':4,m:5,j:6,u:7};
+addEventListener('keydown',e=>{
+  initAudio();hideStart();
+  const k=e.key.toLowerCase();
+  if(k in KEYC||k in KEYM||' '==k)e.preventDefault();
+  if(e.repeat)return;
+  if(k in KEYC)chords.set('k'+k,KEYC[k]);
+  else if(k in KEYM)melody.set('k'+k,KEYM[k]);
+  else if(k=='q')chords.cycle(-1);else if(k=='e')chords.cycle(1);
+  else if(k=='y')melody.cycle(-1);else if(k=='p')melody.cycle(1);
+});
+addEventListener('keyup',e=>{const k=e.key.toLowerCase();chords.set('k'+k,null);melody.set('k'+k,null)});
+function hideStart(){$('#start').style.display='none'}
+$('#start').addEventListener('pointerdown',()=>{initAudio();hideStart()});
+// Gamepads
+function sd(x,y,n){
+  if(Math.hypot(x,y)<.5)return null;
+  const d=(Math.atan2(x,-y)*180/Math.PI+360)%360;
+  return Math.round(d/(360/n))%n;
+}
+function dir(gp,n,axes,useDpad){
+  if(!gp)return null;
+  const b=i=>gp.buttons[i]&&gp.buttons[i].pressed;
+  if(useDpad){const dx=(b(15)?1:0)-(b(14)?1:0),dy=(b(13)?1:0)-(b(12)?1:0);if(dx||dy)return sd(dx,dy,n)}
+  for(const a of axes){const r=sd(gp.axes[a]||0,gp.axes[a+1]||0,n);if(r!=null)return r}
+  return null;
+}
+const prev={};let lastStat='';
+function poll(){
+  const gps=[...(navigator.getGamepads?navigator.getGamepads():[])].filter(Boolean);
+  const st=gps.length?gps.length+(gps.length>1?' controllers: P1 chords, P2 melody':' controller: left = chords, right stick = melody'):'No controller found. Use the onscreen pads, keyboard, or press a controller button.';
+  if(st!==lastStat){lastStat=st;$('#stat').textContent=st}
+  chords.set('pad',dir(gps[0],4,[0],true));
+  melody.set('pad',gps[1]?dir(gps[1],8,[0,2],true):gps[0]?dir(gps[0],8,[2],false):null);
+  gps.forEach((gp,gi)=>{
+    const pr=prev[gp.index]||(prev[gp.index]=[]);
+    gp.buttons.forEach((bt,i)=>{
+      const now=bt.pressed;
+      if(now&&!pr[i]){
+        if(!ctx)initAudio();
+        const single=gps.length<2;
+        if(gi==0){
+          if(i==4)chords.cycle(-1);else if(i==5||i==10)chords.cycle(1);
+          else if(single&&i==6)melody.cycle(-1);else if(single&&(i==7||i==11))melody.cycle(1);
+        }else if(gi==1){
+          if(i==4)melody.cycle(-1);else if(i==5||i==10||i==11)melody.cycle(1);
+        }
+        hideStart();
+      }
+      pr[i]=now;
+    });
+  });
+}
+// Visuals
+const cv=$('#cv'),g2=cv.getContext('2d');let W,H,P=[];
+function rs(){const d=devicePixelRatio||1;W=cv.width=innerWidth*d;H=cv.height=innerHeight*d;g2.setTransform(d,0,0,d,0,0)}
+addEventListener('resize',rs);rs();
+function burst(id,i){
+  const r=btns[id][i].getBoundingClientRect(),h=id=='c'?HC[i]:i*45;
+  for(let k=0;k<8;k++)P.push({x:r.left+r.width/2,y:r.top+r.height/2,vx:(Math.random()-.5)*5,vy:-Math.random()*4-1,r:4+Math.random()*8,l:1,h});
+}
+function frame(){
+  poll();
+  g2.clearRect(0,0,innerWidth,innerHeight);
+  P=P.filter(p=>p.l>0);
+  P.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.05;p.l-=.015;g2.globalAlpha=Math.max(p.l,0);g2.fillStyle='hsl('+p.h+',85%,62%)';g2.beginPath();g2.arc(p.x,p.y,p.r*p.l+1,0,7);g2.fill()});
+  g2.globalAlpha=1;
+  requestAnimationFrame(frame);
+}
+frame();
+</script></body></html>
