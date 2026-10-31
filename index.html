@@ -45,22 +45,22 @@ function initAudio(){
   if(ctx){ctx.resume();return}
   ctx=new (window.AudioContext||window.webkitAudioContext)();
   const c=ctx.createDynamicsCompressor();master=ctx.createGain();master.gain.value=.8;
-  master.connect(c);c.connect(ctx.destination);
+  const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=5500;master.connect(lp);lp.connect(c);c.connect(ctx.destination);
 }
 const mtof=m=>440*Math.pow(2,(m-69)/12);
 const INST=['Harp','Piano','Organ','Synth','Bell'];
 function voice(inst,midi,vel,t){
-  const f=mtof(midi),g=ctx.createGain(),os=[];g.connect(master);
+  const f=mtof(midi),g=ctx.createGain(),os=[];g.gain.value=0;g.connect(master);
   const mk=(type,fr,amp,dest)=>{const o=ctx.createOscillator(),a=ctx.createGain();o.type=type;o.frequency.value=fr;a.gain.value=amp;o.connect(a);a.connect(dest||g);o.start(t);os.push(o);return o};
-  let rel=.25,dec=0;
-  if(inst==0){mk('triangle',f,1);mk('sine',f*2,.3);dec=1.6;rel=.2}
-  else if(inst==1){mk('triangle',f,.8);mk('sine',f*2,.25);mk('sine',f*3,.1);dec=2.4;rel=.3}
-  else if(inst==2){mk('sine',f,.6);mk('sine',f*2,.35);mk('sine',f*3,.2);mk('sine',f*4,.1);rel=.15}
-  else if(inst==3){const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=1500;lp.connect(g);mk('sawtooth',f,.4,lp);mk('sawtooth',f*1.006,.4,lp);rel=.3}
-  else{const c=mk('sine',f,1),m=ctx.createOscillator(),mg=ctx.createGain();m.frequency.value=f*3.5;mg.gain.value=f*1.2;m.connect(mg);mg.connect(c.frequency);m.start(t);os.push(m);dec=3;rel=.4}
-  g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(vel,t+.012);
+  let rel=.25,dec=0,att=.015;
+  if(inst==0){mk('triangle',f,1);mk('sine',f*2,.3);dec=1.6;rel=.2;att=.012}
+  else if(inst==1){mk('triangle',f,.8);mk('sine',f*2,.25);mk('sine',f*3,.1);dec=2.4;rel=.3;att=.02}
+  else if(inst==2){mk('sine',f,.6);mk('sine',f*2,.35);mk('sine',f*3,.2);mk('sine',f*4,.1);rel=.2;att=.05}
+  else if(inst==3){const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.setValueAtTime(500,t);lp.frequency.linearRampToValueAtTime(1400,t+.25);lp.connect(g);mk('sawtooth',f,.4,lp);mk('sawtooth',f*1.006,.4,lp);rel=.3;att=.07}
+  else{const c=mk('sine',f,1),m=ctx.createOscillator(),mg=ctx.createGain();m.frequency.value=f*3.5;mg.gain.value=f*.7;m.connect(mg);mg.connect(c.frequency);m.start(t);os.push(m);dec=3;rel=.4;att=.02}
+  g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(vel,t+att);
   if(dec){g.gain.exponentialRampToValueAtTime(.0001,t+dec);os.forEach(o=>o.stop(t+dec+.1))}
-  return{release(){const n=ctx.currentTime;g.gain.cancelScheduledValues(n);g.gain.setValueAtTime(Math.max(g.gain.value,.0001),n);g.gain.setTargetAtTime(0,n,rel/3);os.forEach(o=>{try{o.stop(n+rel*2+.1)}catch(e){}})}};
+  return{release(q){const n=ctx.currentTime;if(n<t){os.forEach(o=>{try{o.stop(n)}catch(e){}});g.gain.cancelScheduledValues(0);g.gain.value=0;return}g.gain.cancelScheduledValues(n);g.gain.setValueAtTime(Math.max(g.gain.value,.0001),n);g.gain.setTargetAtTime(0,n,q?.01:rel/3);os.forEach(o=>{try{o.stop(n+(q?.1:rel*2+.1))}catch(e){}})}};
 }
 // Chords by direction: up C, right G, down Am, left F
 const NC=['C','G','Am','F'],KC=['W','D','S','A'];
@@ -77,10 +77,10 @@ class Part{
     if(i==null)this.src.delete(s);
     else if(this.src.get(s)!==i){this.src.delete(s);this.src.set(s,i)}
     const k=[...this.src.values()],nx=k.length?k[k.length-1]:null;
-    if(nx!==this.cur){this.rel();this.cur=nx;if(nx!=null)this.trig(nx);show(this.id,nx)}
+    if(nx!==this.cur){this.rel(nx!=null);this.cur=nx;if(nx!=null)this.trig(nx);show(this.id,nx)}
   }
-  rel(){this.v.forEach(x=>x.release());this.v=[]}
-  trig(i){if(!ctx)return;this.v=this.play(i,this.inst,ctx.currentTime);burst(this.id,i)}
+  rel(f){this.v.forEach(x=>x.release(f));this.tail=this.v;this.tailT=ctx?ctx.currentTime:0;this.v=[]}
+  trig(i){if(!ctx)return;let d=0;if(this.tail&&this.tail.length&&ctx.currentTime-this.tailT<.5){this.tail.forEach(x=>x.release(true));d=.025}this.tail=[];this.v=this.play(i,this.inst,ctx.currentTime+d);burst(this.id,i)}
   cycle(d){this.setInst((this.inst+d+5)%5)}
   setInst(n){this.inst=n;chips[this.id].forEach((c,j)=>c.classList.toggle('on',j==n));if(this.cur!=null){this.rel();this.trig(this.cur)}}
 }
